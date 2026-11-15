@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="text-scale" content="scale">
+<meta name="theme-color" content="#050b0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Spent">
+<title>Spent</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alexandria:wght@300;500&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap">
+<style>
+/* One screen: a lit orb in the dark (the "Halo" design). Light carries the Brief: green ok, amber watch, red over.
+   Layout: words in the middle of the screen, the mic orb at the bottom under the thumb. */
+@property --c { syntax: "<color>"; inherits: true; initial-value: #d9a756; }
+:root {
+  --bg: #050b0a; --ink: #eef3f1; --dim: rgb(238 243 241 / .78); --faint: rgb(238 243 241 / .62);
+  --line: rgb(255 255 255 / .14);
+  --calm: #d9a756; --ok: #57d39a; --warn: #f2b64c; --over: #ff7a6d; --sheet: #0d1715;
+  --display: "Alexandria", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --body: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
+  --out: cubic-bezier(.22, 1, .36, 1); /* fast start, soft landing */
+  --spring: linear(0, .009, .035 2.1%, .141 4.4%, .723 12.9%, .938 16.7%, 1.017 19.4%, 1.067, 1.099 24.3%, 1.108 26%, 1.103 28%, 1.073 32.6%, 1.007 41.7%, .989 46.6%, .985 50%, .996 60%, 1.002 70%, 1);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); line-height: 1.5; overflow: hidden; -webkit-tap-highlight-color: transparent; }
+p { margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* ---------- the screen ---------- */
+.screen { position: fixed; inset: 0; overflow: hidden;
+  display: grid; grid-template-rows: minmax(0, 1fr) auto;
+  padding-top: calc(64px + env(safe-area-inset-top, 0px));
+  padding-bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 16px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  --c: var(--calm); --i: .25; --haze: .35; transition: --c .9s ease; }
+.screen:is([data-phase="listening"], [data-phase="typing"]) { --i: 1; --haze: .7; }
+.screen[data-phase="thinking"] { --i: .6; --haze: .55; }
+.screen[data-phase="result"] { --i: .9; --haze: .85; }
+.screen[data-phase="result"][data-settled] { --i: .4; --haze: .45; }
+.screen[data-tone="ok"] { --c: var(--ok); }
+.screen[data-tone="warn"] { --c: var(--warn); }
+.screen[data-tone="over"] { --c: var(--over); }
+.haze { position: absolute; inset: 0; pointer-events: none; opacity: var(--haze); transition: opacity .9s ease;
+  background:
+    radial-gradient(65% 45% at 0% 0%, color-mix(in srgb, var(--c) 26%, transparent), transparent 70%),
+    radial-gradient(70% 50% at 50% 100%, color-mix(in srgb, var(--c) 24%, transparent), transparent 70%),
+    radial-gradient(50% 35% at 100% 0%, color-mix(in srgb, var(--c) 10%, transparent), transparent 70%); }
+.screen::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 60%, transparent 45%, rgb(0 0 0 / .6) 100%); }
+
+/* ---------- the words: centered, every state shares one cell and cross-fades ---------- */
+.out { position: relative; z-index: 2; display: grid; place-items: center; min-height: 0; overflow-y: auto; text-align: center; }
+.out > * { grid-area: 1 / 1; width: min(22rem, 100%); }
+.fade { opacity: 0; visibility: hidden; /* hidden things are also unreachable by tab and screen readers */
+  transition: opacity .35s var(--out), translate .5s var(--out), filter .5s var(--out), visibility 0s linear .35s;
+  @media (prefers-reduced-motion: no-preference) { translate: 0 10px; filter: blur(6px); } }
+.fade.on { opacity: 1; visibility: visible; translate: none; filter: none;
+  transition: opacity .45s var(--out) var(--d, 0s), translate .6s var(--out) var(--d, 0s), filter .6s var(--out) var(--d, 0s), visibility 0s; }
+
+.status { font-size: 1.0625rem; color: var(--dim); text-wrap: balance; }
+.status[data-heard] { color: var(--ink); font-size: 1.25rem; }
+.typed input { width: 100%; min-block-size: 3rem; padding: .75rem 1rem; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); background: rgb(255 255 255 / .06); color: var(--ink); font-size: 1.0625rem; text-align: center; }
+.typed input::placeholder { color: var(--faint); }
+
+.result { display: grid; justify-items: center; gap: .375rem; }
+.result > .fade { width: auto; }
+.amt { font-family: var(--display); font-weight: 500; font-size: clamp(3rem, 2.4rem + 3vw, 4rem); line-height: 1.05; font-variant-numeric: tabular-nums; }
+.amt small { font-size: .38em; font-weight: 300; color: var(--dim); margin-inline-start: .25rem; }
+.label { font-size: 1rem; color: var(--dim); }
+.line { font-size: 1rem; max-width: 30ch; color: color-mix(in srgb, var(--c) 70%, var(--ink)); text-wrap: balance; }
+.heard { font-size: .875rem; color: var(--faint); }
+.result .amt { --d: 0s; } .result .label { --d: .07s; } .result .line { --d: .14s; } .result .heard { --d: .21s; } .result .undo { --d: .28s; }
+.pill { background: rgb(255 255 255 / .07); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; min-block-size: 2.75rem; padding: .5rem 1.5rem; font-size: .9375rem; cursor: pointer; margin-top: .75rem; }
+
+/* ---------- the mic, bottom center ---------- */
+.dock { position: relative; z-index: 2; display: grid; place-items: center; padding-top: 24px; }
+.orb { position: relative; width: 132px; height: 132px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; color: var(--ink);
+  background: radial-gradient(circle at 50% 28%, #1c2a26 0%, #0b1513 72%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / .07), inset 0 1px 0 rgb(255 255 255 / .09),
+    0 0 calc(36px + 64px * var(--i)) calc(2px + 14px * var(--i)) color-mix(in srgb, var(--c) 48%, transparent);
+  transition: box-shadow .6s ease, scale .5s var(--spring); }
+.orb svg { width: 44px; height: 44px; position: relative; transition: opacity .3s ease; }
+.orb:focus-visible { outline-offset: 8px; }
+.orb[aria-disabled="true"] { cursor: progress; }
+.halo, .ring { position: absolute; border-radius: 50%; pointer-events: none; }
+.halo { inset: -40px; opacity: 0; transition: opacity .5s;
+  background: radial-gradient(circle, color-mix(in srgb, var(--c) 34%, transparent) 0%, transparent 64%); }
+.ring { inset: 0; border: 1.5px solid color-mix(in srgb, var(--c) 60%, transparent); opacity: 0; }
+.screen:is([data-phase="listening"], [data-phase="typing"]) .halo { opacity: 1; }
+.screen[data-phase="thinking"] .halo { opacity: .7; }
+/* motion only for people who haven't asked to reduce it; the glow alone carries the state otherwise */
+@media (prefers-reduced-motion: no-preference) {
+  .orb:active { scale: .95; }
+  .screen[data-phase="listening"] .orb { scale: 1.06; }
+  .screen:is([data-phase="listening"], [data-phase="typing"]) .halo { animation: breathe 1.7s ease-in-out infinite; }
+  .screen[data-phase="thinking"] .halo { animation: breathe .8s ease-in-out infinite; }
+  .screen[data-phase="thinking"] .orb svg { animation: dim 1.2s ease-in-out infinite; }
+  .screen[data-phase="listening"] .ring { animation: ripple 2.4s var(--out) infinite; }
+  .screen[data-phase="listening"] .ring + .ring { animation-delay: 1.2s; }
+}
+@keyframes breathe { 50% { scale: 1.14; } }
+@keyframes ripple { from { opacity: .7; scale: 1; } to { opacity: 0; scale: 1.9; } }
+@keyframes dim { 50% { opacity: .45; } }
+
+/* ---------- corners ---------- */
+.corner { position: fixed; z-index: 5; top: calc(12px + env(safe-area-inset-top, 0px)); display: flex; gap: 8px; align-items: center; }
+.corner.l { left: max(12px, env(safe-area-inset-left, 0px)); }
+.corner.r { right: max(12px, env(safe-area-inset-right, 0px)); }
+.icon { min-width: 44px; min-height: 44px; padding: 0 .5rem; border-radius: 999px; border: 1px solid var(--line); background: rgb(255 255 255 / .04); display: grid; place-items: center; cursor: pointer; color: var(--dim); font-size: .9375rem; transition: color .2s, background-color .2s; }
+.icon:active { background: rgb(255 255 255 / .1); }
+.icon svg { width: 20px; height: 20px; }
+.pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+
+/* ---------- setup: a native modal that slides up from the bottom ---------- */
+.sheet { margin: auto auto 0; width: min(100%, 36rem); max-width: 100%; max-height: 88dvh; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--sheet); color: var(--ink); border: 0; border-top: 1px solid var(--line); border-radius: 24px 24px 0 0;
+  padding-block: 1.25rem calc(1.375rem + env(safe-area-inset-bottom, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px));
+  box-shadow: 0 -20px 60px rgb(0 0 0 / .6);
+  opacity: 0; transition-property: opacity, translate, display, overlay; transition-duration: .35s; transition-timing-function: var(--out);
+  transition-behavior: allow-discrete;
+  @media (prefers-reduced-motion: no-preference) { translate: 0 100%; }
+  @media (prefers-reduced-motion: reduce) { transition-duration: .12s; } }
+.sheet[open] { display: grid; gap: 1rem; }
+:is(.sheet[open]):where(:not([data-closing])) { opacity: 1; translate: none;
+  @starting-style { opacity: 0; }
+  @media (prefers-reduced-motion: no-preference) { @starting-style { translate: 0 100%; } } }
+.sheet::backdrop { background: rgb(0 0 0 / 0); overflow: hidden; overscroll-behavior: contain;
+  transition-property: background-color, display, overlay; transition-duration: .35s; transition-behavior: allow-discrete; }
+:is(.sheet[open]):where(:not([data-closing]))::backdrop { background: rgb(0 0 0 / .55);
+  @starting-style { background: rgb(0 0 0 / 0); } }
+.grab { justify-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin-top: -.25rem; }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.sheet h2 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 1.25rem; }
+.sheet p, .sheet small { font-size: .875rem; color: var(--dim); line-height: 1.6; }
+.step { display: grid; gap: .5rem; padding: .875rem; border-radius: 16px; border: 1px solid var(--line); transition: border-color .4s ease; }
+.step[data-done] { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.step h3 { margin: 0; font-size: 1rem; font-weight: 500; display: flex; gap: .5rem; align-items: center; }
+.step .done { color: var(--ok); }
+.sheet input, .sheet select { width: 100%; min-block-size: 2.75rem; padding: .625rem .75rem; border-radius: 12px; border: 1px solid var(--line); background: #08110f; color: var(--ink); }
+.sheet input[type="password"], .sheet select { direction: ltr; text-align: left; }
+.btn, .ghost { min-block-size: 2.75rem; border-radius: 12px; padding: .625rem 1.125rem; cursor: pointer; text-align: center; text-decoration: none; display: inline-grid; place-items: center; transition: filter .2s, background-color .2s; }
+.btn { background: var(--calm); color: #1a1206; border: 2px solid transparent; font-weight: 500; }
+.btn:active { filter: brightness(.9); }
+.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; }
+.err { color: var(--over); }
+
+/* High-contrast mode drops glows and gradients: give the orb and panels real edges */
+@media (forced-colors: active) {
+  .orb, .icon, .pill, .step, .sheet, .typed input { border: 2px solid ButtonText; }
+  .halo, .ring, .haze, .screen::after { display: none; }
+}
+</style>
+</head>
+<body>
+<main class="screen" id="screen" data-phase="idle">
+  <div class="haze" aria-hidden="true"></div>
+
+  <div class="out">
+    <p class="status fade on" id="status">اضغط واتكلم</p>
+    <form class="typed fade" id="typedForm"><input id="typed" autocomplete="off" enterkeyhint="send" lang="ar" dir="rtl" placeholder="اكتب أو اضغط 🎤 في الكيبورد" aria-label="الصرفة"></form>
+    <div class="result fade" id="result">
+      <p class="amt fade" id="amt"></p>
+      <p class="label fade" id="label"></p>
+      <p class="line fade" id="line"></p>
+      <p class="heard fade" id="heard"></p>
+      <button class="pill undo fade" id="undo" type="button">تراجع</button>
+    </div>
+  </div>
+
+  <div class="dock">
+    <button class="orb" id="orb" type="button" aria-label="اضغط واتكلم">
+      <span class="halo" aria-hidden="true"></span>
+      <span class="ring" aria-hidden="true"></span><span class="ring" aria-hidden="true"></span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
+    </button>
+  </div>
+</main>
+
+<!-- one polite and one urgent announcer, so screen readers hear the Brief once and not every interim word -->
+<p class="sr-only" id="say" aria-live="polite" aria-atomic="true"></p>
+<p class="sr-only" id="shout" role="alert" aria-atomic="true"></p>
+
+<div class="corner l"><button class="icon" id="gear" type="button" aria-label="الإعدادات">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>
+</button></div>
+<div class="corner r"><button class="icon pending" id="pending" type="button" hidden></button></div>
+
+<dialog class="sheet" id="sheet" aria-labelledby="sheetTitle" closedby="any">
+  <div class="grab" aria-hidden="true"></div>
+  <div class="sheet-head">
+    <h2 id="sheetTitle">Spent</h2>
+    <button class="icon" id="closeSheet" type="button" aria-label="اقفل">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="step" id="stepClaude">
+    <h3 id="claudeTitle">١. مفتاح Claude <span class="done" id="claudeDone" hidden>✓<span class="sr-only"> جاهز</span></span></h3>
+    <small id="claudeHelp">من console.anthropic.com. لو اشتراكك Max أو Ultra، فيه رصيد API من الاشتراك. المفتاح بيفضل على الموبايل ده بس.</small>
+    <input id="key" type="password" autofocus autocomplete="off" placeholder="sk-ant-…" aria-labelledby="claudeTitle" aria-describedby="claudeHelp">
+    <select id="model" aria-label="موديل Claude">
+      <option value="claude-haiku-5-5">Claude Haiku 5.5 · أسرع وأرخص</option>
+      <option value="claude-sonnet-5-5">Claude Sonnet 5.5</option>
+      <option value="claude-opus-5-5">Claude Opus 5.5 · أدق</option>
+    </select>
+  </div>
+  <div class="step" id="stepGoogle">
+    <h3 id="googleTitle">٢. شيت جوجل <span class="done" id="googleDone" hidden>✓<span class="sr-only"> متوصّل</span></span></h3>
+    <small>Spent بيعمل شيت في الدرايف بتاعك ويكتب فيه. مابيشوفش أي ملف تاني.</small>
+    <div class="row">
+      <button class="btn" id="connect" type="button">اربط جوجل</button>
+      <a class="ghost" id="openSheet" target="_blank" rel="noopener" hidden>افتح الشيت</a>
+    </div>
+    <small id="googleMsg" role="status"></small>
+  </div>
+  <div class="row"><button class="btn" id="save" type="button">تمام</button></div>
+</dialog>
+
+<script type="module" src="app.js?v=5"></script>
+</body>
+</html>
