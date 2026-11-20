@@ -1,13 +1,14 @@
 // Spent: tap, speak, Brief back. The phone holds every Entry and the Google Sheet mirrors it (ADR-0005).
 // Bump ?v= in every import (and in index.html) on each release: iOS Safari caches modules hard.
-import { createSpeech } from './speech.js?v=7';
-import { createUnderstanding, createAdviser, Anthropic, FAST } from './claude.js?v=7';
-import { createLedgerClient, AuthNeeded } from './sheets.js?v=7';
-import { reconcile, settle, applyOps } from './sync.js?v=7';
+import { createSpeech } from './speech.js?v=261120170220';
+import { createUnderstanding, createAdviser, Anthropic, FAST } from './claude.js?v=261120170220';
+import { createLedgerClient, AuthNeeded } from './sheets.js?v=261120170220';
+import { reconcile, settle, applyOps } from './sync.js?v=261120170220';
 import { monthModel, standing, brief, toEntry, isoDate, findBankMatch, matchInto, categoryFor, cashInHand, cashCountEntry, corrected,
-  answer, nextAsk, askText, today, monthRows, moneySummary, monthKey, KIND_AR, UNKNOWN, DEFAULT_CATEGORIES } from './logic.js?v=7';
-import { GOOGLE_CLIENT_ID } from './config.js?v=7';
+  answer, nextAsk, askText, today, monthRows, moneySummary, monthKey, KIND_AR, UNKNOWN, DEFAULT_CATEGORIES } from './logic.js?v=261120170220';
+import { GOOGLE_CLIENT_ID } from './config.js?v=261120170220';
 
+const BUILD = '2026-11-20 17:02:20 UTC'; // stamped by tools/release.mjs; a phone compares it with version.json to update itself
 const $ = id => document.getElementById(id);
 const fmt = n => Math.round(n).toLocaleString('en-US'); // Western digits everywhere: screen, Sheet and Claude's replies
 const store = {
@@ -151,24 +152,31 @@ async function adviseOn(question) {
 }
 
 /* ---------- the adviser's voice: the phone's own Arabic voice ---------- */
-const canSpeak = 'speechSynthesis' in window;
-let voiceReady = false;
-function unlockVoice() { // iOS only lets a page speak after it has spoken once from a tap
-  if (!canSpeak || voiceReady) return;
-  try { speechSynthesis.speak(new SpeechSynthesisUtterance('')); voiceReady = true; } catch {}
+// Off for now: the iPhone has no Egyptian Arabic voice, and the Arabic it has sounds wrong. Answers stay on screen.
+const SPEAK = false;
+const canSpeak = SPEAK && 'speechSynthesis' in window;
+// iOS speaks only for a page that has spoken from a tap. An empty utterance doesn't count, so each tap says a silent space.
+function unlockVoice() {
+  if (!canSpeak) return;
+  try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch {}
 }
-function hush() { try { if (canSpeak) speechSynthesis.cancel(); } catch {} }
+function hush() { try { if (canSpeak && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel(); } catch {} }
+function arabicVoice() {
+  const voices = speechSynthesis.getVoices();
+  return voices.find(x => x.lang === 'ar-EG') || voices.find(x => x.lang?.replace('_', '-').startsWith('ar'));
+}
 function speakAloud(text) {
   if (!canSpeak) return;
   try {
     hush();
+    speech.release(); // with the mic still open, iOS plays the voice quietly in the earpiece, or not at all
     const u = new SpeechSynthesisUtterance(text.replace(/[«»"]/g, ''));
-    const voices = speechSynthesis.getVoices();
-    const v = voices.find(x => x.lang === 'ar-EG') || voices.find(x => x.lang?.startsWith('ar'));
-    u.lang = v?.lang || 'ar-EG'; if (v) u.voice = v;
-    speechSynthesis.speak(u);
+    const v = arabicVoice();
+    u.lang = v?.lang || 'ar-SA'; if (v) u.voice = v;
+    setTimeout(() => speechSynthesis.speak(u), 250); // give iOS a moment to switch the audio back from recording
   } catch {}
 }
+if (canSpeak) speechSynthesis.getVoices(); // iOS loads its voice list on first ask
 
 function addEntry(j, text) {
   let entry = toEntry(j, text, new Date(), rate(), newId());
@@ -507,11 +515,72 @@ if (!('closedBy' in HTMLDialogElement.prototype)) { // tap outside to close wher
 }
 $('connect').addEventListener('click', connectGoogle);
 $('pending').addEventListener('click', () => (ledger.connected ? sync() : connectGoogle()));
+$('stepVoice').hidden = !canSpeak;
+$('testVoice').addEventListener('click', () => { // from a tap, so iOS allows it: hearing nothing here means the phone itself is silent
+  hush();
+  const u = new SpeechSynthesisUtterance('أهلاً، ده صوت المستشار في Spent');
+  const v = arabicVoice(); u.lang = v?.lang || 'ar-SA'; if (v) u.voice = v;
+  speechSynthesis.speak(u);
+  $('voiceMsg').textContent = v ? `الصوت: ${v.name}` : 'مفيش صوت عربي على الموبايل؛ زوّده من الإعدادات ← تسهيلات الاستخدام ← المحتوى المنطوق ← الأصوات';
+});
 $('save').addEventListener('click', () => {
   settings = { key: $('key').value.trim(), model: $('model').value };
   store.set('settings', settings);
   closeSheet(); paint(); paintToday(false);
 });
+
+/* ---------- updates: the same way as Totap (herdr-dr) ---------- */
+// sw.js serves the app from a cache, so it opens at once. version.json names the newest release (tools/release.mjs).
+// The app checks it when it opens, when it comes back to the front and every 10 minutes; a newer release downloads in
+// the background, and the app reloads into it when nothing would be lost: no answer on screen, no sheet open.
+const update = { state: 'idle', build: null, checked: 0 };
+const SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+function toWorker(msg, ms = 60_000) {
+  return new Promise((res, rej) => {
+    const sw = navigator.serviceWorker?.controller;
+    if (!sw) return rej(new Error('no worker yet'));
+    const ch = new MessageChannel(), t = setTimeout(() => rej(new Error('timeout')), ms);
+    ch.port1.onmessage = e => { clearTimeout(t); res(e.data); };
+    sw.postMessage(msg, [ch.port2]);
+  });
+}
+async function checkUpdate(manual = false) {
+  if (!navigator.serviceWorker?.controller || ['checking', 'downloading', 'ready'].includes(update.state)) return;
+  if (!manual && Date.now() - update.checked < 60_000) return;
+  update.state = 'checking'; paintVersion();
+  try {
+    const info = await (await fetch('./version.json', { cache: 'no-store' })).json();
+    update.checked = Date.now();
+    if (!info?.build || info.build === BUILD || !Array.isArray(info.files)) { update.state = 'current'; return; }
+    const files = info.files.filter(f => typeof f === 'string' && SAFE_FILE.test(f));
+    if (!files.includes('index.html') || !files.includes('app.js')) throw new Error('incomplete release');
+    update.state = 'downloading'; update.build = info.build; paintVersion();
+    const r = await toWorker({ update: files });
+    if (!r?.ok) throw new Error(r?.error || 'download failed');
+    update.state = 'ready';
+    applyWhenSafe();
+  } catch (e) { update.state = 'failed'; console.warn('update', e); }
+  finally { paintVersion(); }
+}
+const safeToReload = () => document.visibilityState === 'visible' && phase === 'idle' && !month.open && !$('sheet').open;
+function applyUpdate() { try { sessionStorage.setItem('spent:updated', update.build || ''); } catch {} location.reload(); }
+function applyWhenSafe() { if (update.state === 'ready' && safeToReload()) applyUpdate(); }
+function paintVersion() {
+  const st = { checking: 'بيدوّر على نسخة جديدة…', downloading: 'بينزّل النسخة الجديدة…', ready: 'نسخة جديدة جاهزة، هتتركّب لوحدها',
+    failed: 'ماقدرش يدوّر على تحديث دلوقتي', current: 'محدّث' }[update.state] || 'بيتحدّث لوحده';
+  $('appVersion').textContent = `النسخة ${BUILD} · ${st}`;
+  $('updateNow').hidden = update.state !== 'ready';
+}
+$('updateNow').addEventListener('click', applyUpdate);
+if ('serviceWorker' in navigator) {
+  // updateViaCache 'none': each check for a new worker goes to the network, not the HTTP cache.
+  navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(e => console.warn('sw', e));
+  setTimeout(() => checkUpdate(), 3000);
+  setInterval(() => { if (document.visibilityState === 'visible') checkUpdate(); }, 10 * 60_000);
+  setInterval(applyWhenSafe, 3000); // an update waiting on an answer or an open sheet goes once they're done
+}
+try { const done = sessionStorage.getItem('spent:updated'); sessionStorage.removeItem('spent:updated'); if (done) setTimeout(() => flash('اتحدّث Spent'), 300); } catch {}
+paintVersion();
 
 // Google's sign-in script; the app works fully without it and syncs once connected.
 const gsi = document.createElement('script');
@@ -521,4 +590,4 @@ document.head.appendChild(gsi);
 if (!settings.key) openSheet();
 paint(); paintToday(false);
 sync();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { sync(); applyWhenSafe(); checkUpdate(); } });

@@ -66,5 +66,7 @@ export function createSpeech({ lang = 'ar-EG', onInterim = () => {}, log = () =>
     session.timers.watch = setTimeout(() => { log('watchdog'); try { rec.abort(); } catch {} rec = null; if (session) session.error ||= 'stuck'; finish(); }, STOP_WATCHDOG_MS);
   }
 
-  return { supported: !!SR, listen, stop, get listening() { return !!session; } };
+  // Let go of the mic now, not after the grace window: while it is open, iOS plays sound quietly through the earpiece.
+  const releaseNow = () => release('speak');
+  return { supported: !!SR, listen, stop, release: releaseNow, get listening() { return !!session; } };
 }

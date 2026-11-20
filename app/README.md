@@ -13,6 +13,7 @@ The home screen shows one number, Today: what you can still spend today and keep
 | `sync.js` | Local-first sync: reconcile the phone with the Sheet, Matches for late SMS, what to write; pure, tested by `sync.test.mjs` |
 | `logic.js` | Budgets, Pace, Today, the Month View, the Savings Goal, the Brief, Cash, Corrections, Questions and Asks; pure, tested by `logic.test.mjs` and `sync.test.mjs` |
 | `config.js` | The Google OAuth client ID |
+| `sw.js` | The service worker: the app opens from its cache at once, and it installs new releases (see Releasing) |
 | `../hub/` | The Apps Script that saves bank SMS into the Ledger (ADR-0006, 0007); see `hub/README.md` |
 
 ## Run
@@ -29,7 +30,7 @@ Check the logic with `node app/logic.test.mjs`, `node app/sync.test.mjs` and `no
 
 ## Releasing
 
-Bump `?v=` on every import in `app.js`, `sheets.js`, `sync.js`, `claude.js` and `layout.js`, and on `app.js` in `index.html`. iOS Safari caches modules hard; a stale `logic.js` froze an early build once.
+Run `node tools/release.mjs` before committing a change to the app. It stamps a new build into `app.js` and into every `?v=` (iOS Safari caches modules hard), and writes `version.json`. Phones check `version.json` when Spent opens, when it comes back to the front and every 10 minutes; `sw.js` downloads the whole release in the background, and the app reloads into it when nothing is on screen. Bump `SW_VERSION` in `sw.js` when you change it.
 
 ## Ledger layout (created on first Google connect)
 

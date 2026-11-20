@@ -11,8 +11,8 @@
 <meta name="apple-mobile-web-app-title" content="Spent">
 <title>Spent</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon-180.png?v=6">
-<link rel="icon" href="icon-512.png?v=6">
+<link rel="apple-touch-icon" href="icon-180.png?v=261120170220">
+<link rel="icon" href="icon-512.png?v=261120170220">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500&display=swap">
 <style>
@@ -175,6 +175,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .btn:active { opacity: .85; }
 .ghost { border: 1px solid var(--line); color: var(--ink); }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }
+.ver { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
 
 @media (prefers-reduced-motion: reduce) { .today, .num .strip, .slip, .month, .orb, .wait { transition-duration: .01s !important; } }
 @media (forced-colors: active) { .orb, .icon, .step, .sheet, .month, .typed input { border: 2px solid ButtonText; } }
@@ -254,9 +255,16 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
     </div>
     <small id="googleMsg" role="status"></small>
   </div>
+  <div class="step" id="stepVoice">
+    <h3>3. صوت المستشار</h3>
+    <small>لو مش سامع رد المستشار: شيل الموبايل من الصامت وعلّي الصوت، وجرّب هنا.</small>
+    <div class="row"><button class="ghost" id="testVoice" type="button">جرّب الصوت</button></div>
+    <small id="voiceMsg" role="status"></small>
+  </div>
   <div class="row"><button class="btn" id="save" type="button">تمام</button></div>
+  <p class="ver"><small id="appVersion" role="status"></small> <button class="ghost" id="updateNow" type="button" hidden>حدّث دلوقتي</button></p>
 </dialog>
 
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=261120170220"></script>
 </body>
 </html>
