@@ -92,6 +92,14 @@ _Avoid_: Sinking fund, reserve, savings pot
 The month-end total a Variable Category is heading for if the user keeps spending at this month's rate so far. It only counts from the 10th of the month; before then the Budget alone is the yardstick.
 _Avoid_: Forecast, prediction, trend
 
+**Today**:
+The number on the home screen: what can still be spent today and keep the Variable Budgets on an even spread to the month's end. It is what those Budgets had left this morning, split evenly over the days left (today included), less today's spending in Variable Categories. Past zero it turns red and shows tomorrow's figure. With no Variable Budget it shows what was spent today.
+_Avoid_: Allowance, safe to spend, daily budget, balance
+
+**Month View**:
+The list behind a swipe up: one row per Category with a Budget, a Set-aside or spending this month, each with its bar and a tick where even spending would be today; Variable Categories say how many days ahead or behind they are.
+_Avoid_: Dashboard, report, summary
+
 **Check-in**:
 The evening notification: what was spent today, whether the month is on track, and a reminder about Cash spent but not yet logged.
 _Avoid_: Daily report, digest, reminder

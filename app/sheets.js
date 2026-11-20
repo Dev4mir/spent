@@ -1,7 +1,7 @@
 // The Ledger: the user's own Google Sheet, reached straight from the browser (ADR-0002). The phone's mirror (ADR-0005).
 // Auth is Google Identity Services' token model with drive.file only (non-sensitive scope).
-import { ENTRY_HEADERS, BUDGET_HEADERS, RULE_HEADERS, DEFAULT_CATEGORIES, TYPE_AR, categoryToRow, entryToRow, rowToEntry, rowToCategory } from './logic.js?v=5';
-import { LAYOUT, layoutRequests, layoutValues, chartRequests, styleRules } from './layout.js?v=5';
+import { ENTRY_HEADERS, BUDGET_HEADERS, RULE_HEADERS, DEFAULT_CATEGORIES, TYPE_AR, categoryToRow, entryToRow, rowToEntry, rowToCategory } from './logic.js?v=6';
+import { LAYOUT, layoutRequests, layoutValues, chartRequests, styleRules } from './layout.js?v=6';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';

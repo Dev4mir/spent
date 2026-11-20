@@ -1,7 +1,7 @@
 // How the Ledger looks in Google Sheets: the Dashboard tab, and the formats, dropdowns and colours of the data tabs.
 // Pure: it only builds Sheets API requests; sheets.js sends them. Tested by layout.test.mjs.
 // The data the app and the hub read stays where it was: Entries!A:J, Budgets!A:D, Settings!B1:B3, Rules!A:B.
-import { KIND_AR, TYPE_AR, SOURCE_AR, UNKNOWN, BUDGET_HEADERS } from './logic.js?v=5';
+import { KIND_AR, TYPE_AR, SOURCE_AR, UNKNOWN, BUDGET_HEADERS } from './logic.js?v=6';
 
 export const LAYOUT = 2; // bump to re-apply the layout to Ledgers that already exist
 export const DASH = 'Dashboard';

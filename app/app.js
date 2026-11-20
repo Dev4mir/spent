@@ -1,20 +1,20 @@
 // Spent: tap, speak, Brief back. The phone holds every Entry and the Google Sheet mirrors it (ADR-0005).
 // Bump ?v= in every import (and in index.html) on each release: iOS Safari caches modules hard.
-import { createSpeech } from './speech.js?v=5';
-import { createUnderstanding, Anthropic, FAST } from './claude.js?v=5';
-import { createLedgerClient, AuthNeeded } from './sheets.js?v=5';
-import { reconcile, settle, applyOps } from './sync.js?v=5';
+import { createSpeech } from './speech.js?v=6';
+import { createUnderstanding, Anthropic, FAST } from './claude.js?v=6';
+import { createLedgerClient, AuthNeeded } from './sheets.js?v=6';
+import { reconcile, settle, applyOps } from './sync.js?v=6';
 import { monthModel, standing, brief, toEntry, isoDate, findBankMatch, matchInto, categoryFor, cashInHand, cashCountEntry, corrected,
-  answer, nextAsk, askText, KIND_AR, UNKNOWN, DEFAULT_CATEGORIES } from './logic.js?v=5';
-import { GOOGLE_CLIENT_ID } from './config.js?v=5';
+  answer, nextAsk, askText, today, monthRows, KIND_AR, UNKNOWN, DEFAULT_CATEGORIES } from './logic.js?v=6';
+import { GOOGLE_CLIENT_ID } from './config.js?v=6';
 
 const $ = id => document.getElementById(id);
-const fmt = n => Math.round(n).toLocaleString('ar-EG');
+const fmt = n => Math.round(n).toLocaleString('en-US'); // Western digits everywhere: screen, Sheet and Claude's replies
 const store = {
   get(k, d) { try { const v = localStorage.getItem('spent:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('spent:' + k, JSON.stringify(v)); } catch {} },
 };
-const UNDO_MS = 8000, USD_FALLBACK = 50, SYNC_DELAY_MS = 1500;
+const SLIP_MS = 5000, USD_FALLBACK = 50, SYNC_DELAY_MS = 1500;
 
 let settings = store.get('settings', { key: '', model: FAST });
 if (!store.get('haikuDefault', false)) { // once: the old default was Opus; Haiku with a Sonnet retry is the new one (roadmap phase 1)
@@ -60,13 +60,13 @@ function change(list) {
 }
 function addOp(op) { db.ops = [...db.ops, op]; meta = applyOps(meta, [op]); save(); scheduleSync(); }
 
-let phase = 'idle', settled = false, shown = null; // shown: what the result screen holds
+let phase = 'idle', shown = null; // shown: what the result screen holds
 const skipped = new Set(); // asks passed over in this session; closing the app asks again
 const timers = {};
 
 const ledger = createLedgerClient({ clientId: GOOGLE_CLIENT_ID, store });
 const understand = createUnderstanding({ getKey: () => settings.key, getModel: () => settings.model });
-const speech = createSpeech({ onInterim: t => t && setStatus(`«${t}»`, { heard: true, quiet: true }) });
+const speech = createSpeech({ onInterim: (all, settledWords, changing) => all && setSaid(settledWords, changing) });
 
 const book = () => ({ categories: meta.categories, entries: db.entries, goal: meta.goal });
 const model = () => monthModel(book(), new Date());
@@ -83,8 +83,8 @@ async function tap() {
   if (!settings.key) return openSheet();
   if (phase === 'listening') return speech.stop();
   if (!speech.supported) return startTyping();
-  phase = 'listening'; settled = false; shown = null;
-  setStatus('بسمعك… اضغط تاني لما تخلص'); say('بسمعك'); paint();
+  phase = 'listening'; shown = null; clearTimeout(timers.settle); clearTimeout(timers.undo); timers.undo = null;
+  setSaid('', 'بسمعك…'); say('بسمعك'); paint(); // within a tenth of a second: the button fills and the words area clears
   const heard = await speech.listen();
   if (heard.error) {
     const why = { 'not-allowed': 'اسمح بالميكروفون من إعدادات المتصفح', 'no-speech': 'ماسمعتش حاجة، جرّب تاني', network: 'التعرّف على الكلام محتاج نت', stuck: 'الميكروفون علّق، اضغط تاني' }[heard.error] || `مشكلة في الميكروفون: ${heard.error}`;
@@ -106,7 +106,7 @@ $('typedForm').addEventListener('submit', ev => {
 $('typed').addEventListener('blur', () => { if (phase === 'typing' && !$('typed').value.trim()) { phase = 'idle'; paint(); } });
 
 async function handle(text, alts) {
-  phase = 'thinking'; setStatus(`«${text}»`, { heard: true }); paint();
+  phase = 'thinking'; setSaid(text, ''); paint(); // your words stay up while Claude reads them: no spinner
   const ask = currentAsk(), last = byId(db.last);
   let j;
   try { j = await understand(text, alts, { categories: meta.categories, ask: ask && askText(ask, fmt), last: last && describe(last) }); }
@@ -200,11 +200,12 @@ function answerAsk(a, j, text) {
   show({ amt: `${fmt(a.egp)}<small>ج</small>`, label: `${a.merchant} → ${j.category}`, line: 'وهتتسجل كده على طول', heard: text, tone: 'ok' }, `${a.merchant}، ${j.category}`);
 }
 
-async function undo() {
+function undo(dir = -1) { // dir: which way the Brief leaves, the way it was swiped
   if (!shown?.undo || !timers.undo) return;
-  clearTimeout(timers.undo); timers.undo = null;
+  clearTimeout(timers.undo); clearTimeout(timers.settle); timers.undo = null;
   change(shown.undo);
-  shown = null; phase = 'idle'; paint(); setStatus('اتلغت · اضغط واتكلم'); say('اتلغت');
+  const slip = $('slip'); slip.style.translate = `${dir * 110}% 0`; setTimeout(() => { slip.style.translate = ''; }, 350);
+  shown = null; phase = 'idle'; flash('اتلغت'); paintToday(false); say('اتلغت');
 }
 
 /* ---------- sync with the Ledger (sync.js) ---------- */
@@ -212,7 +213,7 @@ let syncing = null, again = false;
 function scheduleSync() { clearTimeout(timers.sync); timers.sync = setTimeout(sync, SYNC_DELAY_MS); paintPending(); }
 function sync() {
   if (syncing) { again = true; return syncing; }
-  syncing = doSync().finally(() => { syncing = null; paintPending(); if (phase === 'idle') paint(); if (again) { again = false; sync(); } });
+  syncing = doSync().finally(() => { syncing = null; paintPending(); if (phase === 'idle') { paint(); paintToday(false); } if (month.open) renderMonth(); if (again) { again = false; sync(); } });
   return syncing;
 }
 async function doSync() {
@@ -232,7 +233,7 @@ async function doSync() {
       await ledger.push(p, ops, snap);
       db = settle(db, p, ops.length); save();
     }
-    $('openSheet').href = ledger.url; $('openSheet').hidden = !ledger.url;
+    for (const id of ['openSheet', 'monthSheet']) { $(id).href = ledger.url; $(id).hidden = !ledger.url; }
   } catch (e) {
     if (!(e instanceof AuthNeeded)) { console.warn('sync', e); $('googleMsg').textContent = e.message; } // stays pending; retried on the next change or open
   }
@@ -250,63 +251,153 @@ const labelOf = e => (e.kind === 'expense' ? e.category : { income: 'دخل', sa
 const amtOf = e => (e.currency === 'USD' ? `$${fmt(e.amount)}` : `${fmt(e.egp)}<small>ج</small>`);
 function showEntry(e, b, undo) {
   const when = e.date === isoDate(new Date()) ? '' : ` · ${e.date.slice(5).split('-').reverse().join('/')}`;
-  show({ amt: amtOf(e), label: labelOf(e) + (e.merchant ? ` · ${e.merchant}` : '') + when, line: b.lines[0] || '', heard: e.said, tone: b.tone, undo }, null);
+  const label = labelOf(e), line = (b.lines[0] || '').replace(`${label}: `, ''); // the Category is already on the first line
+  show({ amt: amtOf(e), label: label + (e.merchant ? ` · ${e.merchant}` : '') + when, line, tone: b.tone, undo }, null);
 }
-// The result screen: a big number, a label, one line, the words heard, and Undo while it lasts.
+// The Brief: what was saved (Category and amount), one line on where it stands, and Undo while it lasts.
+// Then it leaves and Today rolls to its new number.
 function show(s, spoken) {
-  shown = s; phase = 'result'; settled = false; buzz(s.tone);
+  shown = s; phase = 'result'; buzz(s.tone);
   if (spoken) say(spoken);
-  clearTimeout(timers.undo); timers.undo = s.undo ? setTimeout(() => { timers.undo = null; paint(); }, UNDO_MS) : null;
-  clearTimeout(timers.settle); timers.settle = setTimeout(() => { settled = true; paint(); }, 2800);
+  clearTimeout(timers.undo); timers.undo = s.undo ? setTimeout(() => { timers.undo = null; paint(); }, SLIP_MS) : null;
+  clearTimeout(timers.settle); timers.settle = setTimeout(() => {
+    if (phase !== 'result') return;
+    shown = null; phase = 'idle'; paint(); setTimeout(() => paintToday(true), 180);
+  }, SLIP_MS);
   paint();
 }
-function showError(title, why) { shown = null; show({ amt: '', label: title, line: why, heard: '', tone: 'over' }, null); shout(`${title}. ${why}`); }
-const calm = matchMedia('(prefers-reduced-motion: reduce)');
-function setStatus(t, { heard = false, quiet = false } = {}) { // quiet: interim words update in place, no fade per word
-  const el = $('status');
-  el.toggleAttribute('data-heard', heard);
-  if (el.textContent === t) return;
-  el.textContent = t;
-  if (!quiet && el.classList.contains('on')) el.animate(
-    calm.matches ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, translate: '0 6px', filter: 'blur(4px)' }, { opacity: 1, translate: '0 0', filter: 'blur(0)' }],
-    { duration: calm.matches ? 150 : 380, easing: 'cubic-bezier(.22,1,.36,1)' });
+function showError(title, why) { show({ amt: '', label: title, line: why, tone: 'over' }, null); shout(`${title}. ${why}`); }
+function setSaid(settledWords, changing) { // words still changing are lighter (Apple's advice for live speech)
+  $('fin').textContent = settledWords; $('vol').textContent = (settledWords && changing ? ' ' : '') + changing;
 }
+let note = ''; // a short word in the ask line, like «اتلغت»
+function flash(t) { note = t; paint(); clearTimeout(timers.note); timers.note = setTimeout(() => { note = ''; if (phase === 'idle') paint(); }, 2000); }
 // Screen readers: one polite region for the Brief, one alert region for failures. Clear first so a repeat still speaks.
 function announce(id, text) { const el = $(id); el.textContent = ''; setTimeout(() => { el.textContent = text; }, 60); }
 const say = t => announce('say', t), shout = t => announce('shout', t);
 function buzz(tone) { try { navigator.vibrate?.(tone === 'over' ? [80, 60, 80, 60, 220] : tone === 'warn' ? [60, 60, 60] : 40); } catch {} }
-function readyStatus() {
-  const a = currentAsk();
-  setStatus(!settings.key ? 'اضغط عشان تبدأ' : a ? askText(a, fmt) : speech.supported ? 'اضغط واتكلم' : 'اضغط واكتب، أو 🎤 في الكيبورد', { heard: !!a });
-}
 
 function paint() {
   const scr = $('screen');
   scr.dataset.phase = phase;
-  scr.toggleAttribute('data-settled', settled);
-  const canUndo = phase === 'result' && !!timers.undo && !!shown?.undo;
-  scr.toggleAttribute('data-undo', canUndo);
-  const show_ = (id, on) => $(id).classList.toggle('on', on);
-  show_('status', ['idle', 'listening', 'thinking'].includes(phase));
-  show_('typedForm', phase === 'typing');
+  const on = (id, v) => $(id).classList.toggle('on', v);
+  on('said', phase === 'listening' || phase === 'thinking');
+  on('typedForm', phase === 'typing');
+  const res = phase === 'result' && !!shown;
+  if (res) {
+    $('cat').textContent = shown.label || '';
+    $('amt').innerHTML = shown.amt || '';
+    $('s2').textContent = shown.line || '';
+    $('slip').toggleAttribute('data-attention', shown.tone !== 'ok');
+  }
+  on('slip', res);
+  $('undo').hidden = !(res && timers.undo && shown.undo);
   const orb = $('orb');
   orb.setAttribute('aria-label', phase === 'listening' ? 'خلصت، وقّف التسجيل' : phase === 'thinking' ? 'بيفهم…' : 'اضغط واتكلم');
   if (phase === 'thinking') orb.setAttribute('aria-disabled', 'true'); else orb.removeAttribute('aria-disabled');
-  const res = phase === 'result' && !!shown;
-  if (res) {
-    scr.dataset.tone = shown.tone;
-    $('amt').innerHTML = shown.amt || '';
-    $('label').textContent = shown.label || '';
-    $('line').textContent = shown.line || '';
-    $('heard').textContent = shown.heard ? `«${shown.heard}»` : '';
-  } else delete scr.dataset.tone;
-  // the result group and each line fade together (a visible child would show through a hidden parent)
-  show_('result', res);
-  for (const id of ['amt', 'label', 'line', 'heard']) show_(id, res && !!$(id).textContent);
-  show_('undo', res && canUndo);
-  if (phase === 'idle') readyStatus();
+  if (phase === 'idle') {
+    const a = currentAsk();
+    $('ask').textContent = note || (!settings.key ? 'اضغط عشان تبدأ' : a ? askText(a, fmt) : speech.supported ? '' : 'اضغط واكتب، أو 🎤 في الكيبورد');
+    $('ask').toggleAttribute('data-question', !note && !!a);
+  }
   paintPending();
 }
+
+/* ---------- Today: the one number on the home screen ---------- */
+// Each digit rolls to its new value on its own, ones first. A different number of digits just swaps.
+function roll(el, s, animate) {
+  const prev = el.dataset.s || '', isDigit = ch => ch >= '0' && ch <= '9';
+  const same = prev.length === s.length && [...s].every((ch, i) => isDigit(ch) === isDigit(prev[i]));
+  if (!same || !animate) el.innerHTML = [...s].map(ch => isDigit(ch)
+    ? `<span class="col"><span class="strip">${'0123456789'.split('').map(x => `<span>${x}</span>`).join('')}</span></span>` : `<span>${ch}</span>`).join('');
+  const strips = [...el.querySelectorAll('.strip')], ds = [...s].filter(isDigit);
+  strips.forEach((st, k) => {
+    st.style.transition = animate ? '' : 'none';
+    st.style.transitionDelay = animate ? `${(strips.length - 1 - k) * 50}ms` : '0ms';
+    st.style.translate = `0 ${-Number(ds[k])}em`;
+  });
+  el.dataset.s = s;
+}
+function paintToday(animate) {
+  const t = today(model()), over = t.amount != null && t.amount < 0;
+  const shownAmount = t.amount == null ? t.spentToday : Math.abs(t.amount);
+  roll($('num'), fmt(shownAmount), animate);
+  const label = t.amount == null ? 'صرفت النهارده' : over ? 'زيادة النهارده' : 'النهارده';
+  $('tlabel').textContent = label;
+  $('today').toggleAttribute('data-over', over);
+  $('tmr').textContent = !over || t.tomorrow == null ? '' : t.tomorrow > 0 ? `بكرة ${fmt(t.tomorrow)}` : `عدّيت ميزانيات الشهر بـ ${fmt(-t.left)}`;
+  const hidden = store.get('hideToday', false);
+  $('today').toggleAttribute('data-hidden', hidden);
+  $('numBtn').setAttribute('aria-pressed', String(hidden));
+  $('numBtn').setAttribute('aria-label', hidden ? `${label}: مستخبي، اضغط عشان يظهر` : `${label} ${fmt(shownAmount)} جنيه، اضغط عشان تخبّيه`);
+}
+$('numBtn').addEventListener('click', () => { store.set('hideToday', !store.get('hideToday', false)); paintToday(false); });
+
+/* ---------- the Month View: swipe up, or the handle under the button ---------- */
+const month = { open: false };
+const days = n => (n === 1 ? 'يوم' : n === 2 ? 'يومين' : n <= 10 ? `${fmt(n)} أيام` : `${fmt(n)} يوم`);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function rowValue(r) { // [text, quiet]
+  if (!r.plan) return [fmt(r.spent), true];
+  if (r.spent > r.plan) return [`عدّيت ${fmt(r.spent - r.plan)}`, false];
+  if (r.slack != null) return [r.slack === 0 ? 'ماشي مظبوط' : r.slack > 0 ? `قدامك ${days(r.slack)}` : `ورا ${days(-r.slack)}`, false];
+  if (r.type === 'fixed' && r.spent >= r.plan) return ['اتدفع', true];
+  return [`فاضل ${fmt(r.plan - r.spent)}`, false];
+}
+function renderMonth() {
+  const now = new Date(), m = model(), rows = monthRows(m), t = today(m);
+  $('monthTitle').textContent = now.toLocaleDateString('ar-EG-u-nu-latn', { month: 'long' });
+  $('mday').textContent = `يوم ${fmt(m.day)} من ${fmt(m.days)}`;
+  $('rows').innerHTML = rows.length ? rows.map(r => {
+    const [v, quiet] = rowValue(r);
+    const tick = r.type === 'variable' ? `<b style="right:${m.day / m.days * 100}%"></b>` : ''; // where even spending would be today
+    const bar = r.plan ? `<span class="bar" aria-hidden="true"><i style="width:${Math.min(100, r.spent / r.plan * 100)}%"></i>${tick}</span>` : '';
+    return `<div class="mrow"${r.attention ? ' data-attention' : ''}><span class="n">${esc(r.name)}</span><span class="v${quiet ? ' quiet' : ''}">${v}</span>${bar}</div>`;
+  }).join('') : '<p class="mempty">لسه مفيش حاجة الشهر ده. اضغط واتكلم.</p>';
+  const lines = [];
+  if (t.amount != null) lines.push(`<p${t.left < 0 ? ' data-attention' : ''}><span>المصروف اليومي</span><b>${t.left < 0 ? `عدّيت ${fmt(-t.left)}` : `فاضل ${fmt(t.left)} من ${fmt(t.pool)}`}</b></p>`);
+  const a = answer(book(), { about: 'month', period: 'month' }, now, fmt);
+  if (a.egp != null) lines.push(`<p${a.tone !== 'ok' ? ' data-attention' : ''}><span>${esc(a.label)}</span><b>${fmt(Math.abs(a.egp))}</b></p>`);
+  $('msum').innerHTML = lines.join('');
+  $('msum').hidden = !lines.length;
+}
+function openMonth(on) {
+  if (on) renderMonth();
+  month.open = on;
+  const el = $('month'); el.classList.toggle('open', on); el.setAttribute('aria-hidden', String(!on)); el.inert = !on;
+  if (on) $('grab').focus({ preventScroll: true, focusVisible: false }); // focus moves in for screen readers; no ring after a tap else if (el.contains(document.activeElement)) $('pull').focus({ preventScroll: true });
+}
+$('pull').addEventListener('click', () => openMonth(true));
+$('grab').addEventListener('click', () => openMonth(false));
+addEventListener('keydown', e => { if (e.key === 'Escape' && month.open) openMonth(false); });
+let swipedAt = 0, p0 = null;
+$('screen').addEventListener('pointerdown', e => { p0 = { x: e.clientX, y: e.clientY }; });
+$('screen').addEventListener('pointerup', e => {
+  if (!p0) return; const dx = e.clientX - p0.x, dy = e.clientY - p0.y; p0 = null;
+  if (dy < -60 && Math.abs(dy) > Math.abs(dx) && phase !== 'typing') { swipedAt = Date.now(); openMonth(true); }
+});
+{ // swipe down from the top of the Month View to close it
+  const el = $('month'); let y0 = null;
+  el.addEventListener('touchstart', e => { y0 = el.scrollTop <= 0 ? e.touches[0].clientY : null; }, { passive: true });
+  el.addEventListener('touchmove', e => { if (y0 != null && e.touches[0].clientY - y0 > 70) { y0 = null; openMonth(false); } }, { passive: true });
+  el.inert = true;
+}
+
+/* ---------- swipe the Brief sideways to undo it ---------- */
+{
+  const slip = $('slip'); let x0 = null, dx = 0;
+  slip.addEventListener('pointerdown', e => {
+    if (!shown?.undo || !timers.undo || e.target.closest('.undo')) return;
+    e.stopPropagation(); x0 = e.clientX; dx = 0; slip.classList.add('drag'); slip.setPointerCapture(e.pointerId);
+  });
+  slip.addEventListener('pointermove', e => { if (x0 == null) return; dx = e.clientX - x0; slip.style.translate = `${dx}px 0`; });
+  const end = e => {
+    if (x0 == null) return; e.stopPropagation(); x0 = null; slip.classList.remove('drag');
+    if (Math.abs(dx) > 70) undo(Math.sign(dx)); else slip.style.translate = '';
+  };
+  slip.addEventListener('pointerup', end); slip.addEventListener('pointercancel', end);
+}
+
 function paintPending() {
   const n = db.dirty.length + db.gone.length + db.ops.length;
   $('pending').hidden = !n;
@@ -353,8 +444,8 @@ async function closeSheet() {
   d.close();
 }
 
-$('orb').addEventListener('click', tap);
-$('undo').addEventListener('click', undo);
+$('orb').addEventListener('click', () => { if (Date.now() - swipedAt > 400) tap(); });
+$('undo').addEventListener('click', () => undo(-1));
 $('gear').addEventListener('click', openSheet);
 $('closeSheet').addEventListener('click', closeSheet);
 $('sheet').addEventListener('cancel', ev => { ev.preventDefault(); closeSheet(); }); // Esc and the back gesture animate too
@@ -369,7 +460,7 @@ $('pending').addEventListener('click', () => (ledger.connected ? sync() : connec
 $('save').addEventListener('click', () => {
   settings = { key: $('key').value.trim(), model: $('model').value };
   store.set('settings', settings);
-  closeSheet(); paint();
+  closeSheet(); paint(); paintToday(false);
 });
 
 // Google's sign-in script; the app works fully without it and syncs once connected.
@@ -378,6 +469,6 @@ gsi.src = 'https://accounts.google.com/gsi/client'; gsi.async = true;
 document.head.appendChild(gsi);
 
 if (!settings.key) openSheet();
-paint();
+paint(); paintToday(false);
 sync();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });

@@ -28,7 +28,7 @@ export function createSpeech({ lang = 'ar-EG', onInterim = () => {}, log = () =>
         if (r.isFinal) { session.text += r[0].transcript; session.alts = Array.from(r, a => a.transcript); }
         else interim += r[0].transcript;
       }
-      onInterim((session.text + interim).trim());
+      onInterim((session.text + interim).trim(), session.text.trim(), interim.trim()); // all, settled words, words still changing
     };
     rec.onerror = ev => { log('error', ev.error); if (session) session.error = ev.error; };
     rec.onend = () => { log('end'); finish(); };

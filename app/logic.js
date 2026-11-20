@@ -277,3 +277,42 @@ export function nextAsk({ categories, entries }, today, skipped) {
 export const askText = (a, fmt) => a.type === 'merchant'
   ? `«${a.merchant}» بـ ${fmt(a.egp)} ج: دي كانت إيه؟`
   : `${a.category} مالوش ميزانية. كام في الشهر؟ أو قول «تجاهل»`;
+
+/* ---------- the home screen: Today and the Month View ---------- */
+
+// Day-to-day spending: Expenses in Variable Categories, and in Categories missing from Budgets («؟» included).
+// Fixed bills, Periodic set-asides and Excluded Categories are not part of it.
+function dayToDay(m) {
+  const type = new Map(m.categories.map(c => [c.name, c.type]));
+  return e => e.kind === 'expense' && (type.get(e.category) ?? 'variable') === 'variable';
+}
+const dayOf = e => Number(e.date.slice(8, 10));
+
+// Today: what can still be spent today and keep the Variable Budgets on an even spread to the month's end.
+// What the Variable Budgets had left this morning, split evenly over the days left (today included), less today's spending.
+// It reads Budgets, not the bank balance, so payday timing and Cash don't skew it.
+// { amount: null when no Variable Category has a Budget, spentToday, left: of the Variable Budgets, tomorrow: null on the last day }
+export function today(m) {
+  const pool = sum(m.categories.filter(c => c.type === 'variable').map(c => c.budget || 0));
+  const isDay = dayToDay(m), daily = m.entries.filter(isDay);
+  const before = sum(daily.filter(e => dayOf(e) < m.day).map(e => e.egp));
+  const spentToday = sum(daily.filter(e => dayOf(e) >= m.day).map(e => e.egp));
+  if (!pool) return { amount: null, spentToday, left: null, tomorrow: null, pool: 0 };
+  const left = pool - before - spentToday;
+  return { amount: Math.round((pool - before) / (m.days - m.day + 1) - spentToday), spentToday, left, pool,
+    tomorrow: m.day < m.days ? Math.round(left / (m.days - m.day)) : null };
+}
+
+// The Month View: one row per Category with a Budget, a Set-aside or spending this month, most spent first.
+// attention: past its Budget, or (from the 10th) on Pace to pass it. slack, for a Variable Category with a Budget:
+// how many days of even spending it has in hand (+) or has used up early (−).
+export function monthRows(m) {
+  const named = new Set(m.categories.map(c => c.name));
+  const strays = [...new Set(m.entries.filter(e => e.kind === 'expense' && !named.has(e.category)).map(e => e.category))]
+    .map(name => ({ name, type: 'variable', budget: 0, setAside: 0 }));
+  return [...m.categories, ...strays].map(c => {
+    const st = categoryStatus(m, c), plan = c.type === 'periodic' ? c.setAside : c.budget;
+    return { name: c.name, type: c.type, spent: st.sp, plan: plan || 0, attention: st.tone !== 'ok',
+      slack: c.type === 'variable' && plan && st.sp <= plan ? Math.round(m.day - st.sp / plan * m.days) : null };
+  }).filter(r => r.plan || r.spent).sort((a, b) => b.spent - a.spent);
+}

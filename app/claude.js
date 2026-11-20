@@ -1,7 +1,7 @@
 // Utterance -> what the user meant, with the user's own Claude API key (ADR-0003). Claude cannot take audio; it gets text.
 // One call decides the intent and fills its fields; the app does the rest on the phone (answers to Questions included).
 import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.3.0/+esm';
-import { OTHER } from './logic.js?v=5';
+import { OTHER } from './logic.js?v=6';
 
 export const FAST = 'claude-haiku-5-5', CAREFUL = 'claude-sonnet-5-5'; // Haiku first; Sonnet when Haiku's answer can't be used
 
