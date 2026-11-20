@@ -316,3 +316,42 @@ export function monthRows(m) {
       slack: c.type === 'variable' && plan && st.sp <= plan ? Math.round(m.day - st.sp / plan * m.days) : null };
   }).filter(r => r.plan || r.spent).sort((a, b) => b.spent - a.spent);
 }
+
+/* ---------- what the money adviser reads ---------- */
+
+// The user's money as plain text for the adviser: this month and last, by Category, plus recent Entries.
+// Built once per conversation, so follow-ups reuse it (and Claude's cache).
+export function moneySummary({ categories, entries, goal }, now, fmt) {
+  const book = { categories, entries, goal };
+  const m = monthModel(book, now);
+  const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
+  const lm = monthModel(book, lastDay);
+  const kindSum = (mm, kind) => sum(mm.entries.filter(e => e.kind === kind).map(e => e.egp));
+  const t = today(m), s = standing(m), cash = cashInHand(entries);
+  const lines = [
+    `Date: ${isoDate(now)}, day ${m.day} of ${m.days}. Amounts in EGP.`,
+    t.amount == null
+      ? `Today: no everyday (متغير) Budgets are set; spent today on everyday things: ${fmt(t.spentToday)}.`
+      : `Today's number: ${t.amount < 0 ? `over today's share by ${fmt(-t.amount)}` : `${fmt(t.amount)} still to spend today`}; spent today on everyday things: ${fmt(t.spentToday)}; everyday Budgets left this month: ${fmt(t.left)} of ${fmt(t.pool)}.`,
+    `This month so far: income ${fmt(s.income)}, spent ${fmt(sum(m.entries.filter(e => e.kind === 'expense').map(e => e.egp)))}, saved ${fmt(s.saved)}.`
+      + (s.income ? ` Heading for ${s.savings >= 0 ? `savings of ${fmt(s.savings)}` : `a deficit of ${fmt(-s.savings)}`} by month end.` : ' No income logged this month.')
+      + (goal ? ` Savings goal: ${fmt(goal)} a month.` : ' No savings goal set.'),
+    `Last month: income ${fmt(kindSum(lm, 'income'))}, spent ${fmt(kindSum(lm, 'expense'))}, saved ${fmt(kindSum(lm, 'saving'))}.`,
+    `Cash in hand: ${cash == null ? 'not tracked (no withdrawal logged)' : fmt(cash)}.`,
+    '',
+    'Categories (name | type | monthly budget | set-aside | spent this month | spent last month | note):',
+  ];
+  const lmRows = new Map(monthRows(lm).map(r => [r.name, r.spent]));
+  const rows = monthRows(m), seen = new Set(rows.map(r => r.name));
+  for (const r of [...rows, ...[...lmRows.keys()].filter(n => !seen.has(n)).map(n => ({ name: n, type: findCat(m, n).type, spent: 0, plan: 0 }))]) {
+    const c = findCat(m, r.name);
+    const note = r.attention ? (r.spent > r.plan ? 'over budget' : 'on pace to pass its budget') : r.slack != null ? `${Math.abs(r.slack)} days ${r.slack >= 0 ? 'ahead of' : 'behind'} even spending` : '';
+    lines.push(`${r.name} | ${TYPE_AR[c.type] || c.type} | ${fmt(c.budget || 0)} | ${c.type === 'periodic' ? fmt(c.setAside || 0) : '-'} | ${fmt(r.spent)} | ${fmt(lmRows.get(r.name) || 0)} | ${note}`);
+  }
+  const from = monthKey(lastDay);
+  const recent = entries.filter(e => e.date.slice(0, 7) >= from).sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 40);
+  lines.push('', `Recent entries, newest first (date | kind | amount | category | what they said | shop):`);
+  for (const e of recent) lines.push(`${e.date} | ${e.kind} | ${fmt(e.egp)} | ${e.category || '-'} | ${String(e.said || '').replace(/\s+/g, ' ').slice(0, 80)} | ${e.merchant || '-'}`);
+  if (!recent.length) lines.push('(nothing logged yet)');
+  return lines.join('\n');
+}

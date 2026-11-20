@@ -1,13 +1,13 @@
 # Spent app
 
-The home screen shows one number, Today: what you can still spend today and keep your Variable Budgets on an even pace. Tap it to hide it. Swipe up for the Month View. Tap the button and talk in Egyptian Arabic: an Expense, a Correction («لا كانت ٥٠»، «امسحها»), a Question («صرفت كام على البنزين؟») or a Cash Count («معايا ٥٠٠ كاش»). The phone keeps every Entry and mirrors it to your own Google Sheet (ADR-0005). Static files only: no server, no build step (ADR-0002, 0003, 0004).
+The home screen shows one number, Today: what you can still spend today and keep your Variable Budgets on an even pace. Tap it to hide it. Swipe up for the Month View. Tap the button and talk in Egyptian Arabic: an Expense, a Correction («لا كانت ٥٠»، «امسحها»), a Question («صرفت كام على البنزين؟») or a Cash Count («معايا ٥٠٠ كاش»). Anything else goes to the Adviser: «أعمل إيه عشان أوفّر؟»، «إزاي أحط ميزانية؟». It answers from your own numbers, on screen and aloud, and a question within two minutes carries the conversation on. The phone keeps every Entry and mirrors it to your own Google Sheet (ADR-0005). Static files only: no server, no build step (ADR-0002, 0003, 0004).
 
 | File | Role |
 |---|---|
 | `index.html` | The home screen (Today, the words you say, the Brief, the button), the Month View and the setup sheet |
 | `app.js` | The flow: tap → speech → Claude → an Entry, Correction, Question, Cash Count or answer to an Ask → the screen; the phone's store, Undo, sync |
 | `speech.js` | Browser speech recognition with the iOS open-mic workaround |
-| `claude.js` | Utterance → intent and fields with the user's Claude key: Haiku 5.5 first, Sonnet 5.5 when Haiku's answer can't be used |
+| `claude.js` | Utterance → intent and fields with the user's Claude key: Haiku 5.5 first, Sonnet 5.5 when Haiku's answer can't be used. The Adviser (Sonnet 5.5) for everything else, and what each call cost |
 | `sheets.js` | Google sign-in (`drive.file` only) and the Ledger: create, read everything, push a sync plan |
 | `layout.js` | How the Ledger looks: the Dashboard tab, formulas, formats, dropdowns and charts; pure, tested by `layout.test.mjs` |
 | `sync.js` | Local-first sync: reconcile the phone with the Sheet, Matches for late SMS, what to write; pure, tested by `sync.test.mjs` |

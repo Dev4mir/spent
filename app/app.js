@@ -1,12 +1,12 @@
 // Spent: tap, speak, Brief back. The phone holds every Entry and the Google Sheet mirrors it (ADR-0005).
 // Bump ?v= in every import (and in index.html) on each release: iOS Safari caches modules hard.
-import { createSpeech } from './speech.js?v=6';
-import { createUnderstanding, Anthropic, FAST } from './claude.js?v=6';
-import { createLedgerClient, AuthNeeded } from './sheets.js?v=6';
-import { reconcile, settle, applyOps } from './sync.js?v=6';
+import { createSpeech } from './speech.js?v=7';
+import { createUnderstanding, createAdviser, Anthropic, FAST } from './claude.js?v=7';
+import { createLedgerClient, AuthNeeded } from './sheets.js?v=7';
+import { reconcile, settle, applyOps } from './sync.js?v=7';
 import { monthModel, standing, brief, toEntry, isoDate, findBankMatch, matchInto, categoryFor, cashInHand, cashCountEntry, corrected,
-  answer, nextAsk, askText, today, monthRows, KIND_AR, UNKNOWN, DEFAULT_CATEGORIES } from './logic.js?v=6';
-import { GOOGLE_CLIENT_ID } from './config.js?v=6';
+  answer, nextAsk, askText, today, monthRows, moneySummary, monthKey, KIND_AR, UNKNOWN, DEFAULT_CATEGORIES } from './logic.js?v=7';
+import { GOOGLE_CLIENT_ID } from './config.js?v=7';
 
 const $ = id => document.getElementById(id);
 const fmt = n => Math.round(n).toLocaleString('en-US'); // Western digits everywhere: screen, Sheet and Claude's replies
@@ -14,7 +14,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('spent:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('spent:' + k, JSON.stringify(v)); } catch {} },
 };
-const SLIP_MS = 5000, USD_FALLBACK = 50, SYNC_DELAY_MS = 1500;
+const SLIP_MS = 5000, CHAT_MS = 120_000, USD_FALLBACK = 50, SYNC_DELAY_MS = 1500;
 
 let settings = store.get('settings', { key: '', model: FAST });
 if (!store.get('haikuDefault', false)) { // once: the old default was Opus; Haiku with a Sonnet retry is the new one (roadmap phase 1)
@@ -65,7 +65,13 @@ const skipped = new Set(); // asks passed over in this session; closing the app 
 const timers = {};
 
 const ledger = createLedgerClient({ clientId: GOOGLE_CLIENT_ID, store });
-const understand = createUnderstanding({ getKey: () => settings.key, getModel: () => settings.model });
+// What Claude cost this month, on this phone: every call adds to it (shown at the bottom of the Month View).
+function addCost(usd) { const k = monthKey(new Date()), c = store.get('claudeCost', {}); store.set('claudeCost', { [k]: (c[k] || 0) + usd }); }
+const understand = createUnderstanding({ getKey: () => settings.key, getModel: () => settings.model, onCost: addCost });
+const advise = createAdviser({ getKey: () => settings.key, onCost: addCost });
+// The conversation with the adviser: the turns so far, the numbers it was given, and until when a new tap carries it on.
+let chat = null;
+const chatting = () => (chat && Date.now() < chat.until ? chat : null);
 const speech = createSpeech({ onInterim: (all, settledWords, changing) => all && setSaid(settledWords, changing) });
 
 const book = () => ({ categories: meta.categories, entries: db.entries, goal: meta.goal });
@@ -82,6 +88,7 @@ async function tap() {
   if (phase === 'thinking') return;
   if (!settings.key) return openSheet();
   if (phase === 'listening') return speech.stop();
+  hush(); unlockVoice(); // a tap stops the adviser talking, and lets iOS speak the next answer
   if (!speech.supported) return startTyping();
   phase = 'listening'; shown = null; clearTimeout(timers.settle); clearTimeout(timers.undo); timers.undo = null;
   setSaid('', 'بسمعك…'); say('بسمعك'); paint(); // within a tenth of a second: the button fills and the words area clears
@@ -99,7 +106,7 @@ function startTyping() { // fallback when the browser has no speech recognition:
 }
 $('typedForm').addEventListener('submit', ev => {
   ev.preventDefault();
-  const t = $('typed').value.trim(); $('typed').blur();
+  const t = $('typed').value.trim(); $('typed').blur(); unlockVoice();
   if (!t) { phase = 'idle'; return paint(); }
   handle(t, []);
 });
@@ -109,21 +116,58 @@ async function handle(text, alts) {
   phase = 'thinking'; setSaid(text, ''); paint(); // your words stay up while Claude reads them: no spinner
   const ask = currentAsk(), last = byId(db.last);
   let j;
-  try { j = await understand(text, alts, { categories: meta.categories, ask: ask && askText(ask, fmt), last: last && describe(last) }); }
-  catch (e) {
-    if (e instanceof Anthropic.AuthenticationError) return showError('مفتاح Claude مش شغال', 'راجعه من الإعدادات');
-    if (e instanceof Anthropic.RateLimitError) return showError('Claude مشغول', 'استنى شوية وجرّب تاني');
-    if (e instanceof Anthropic.APIConnectionError) return showError('مفيش نت', 'Claude محتاج نت يفهم الجملة؛ قولها تاني بعدين');
-    return showError('Claude ماردّش', e.message || String(e));
-  }
+  try { j = await understand(text, alts, { categories: meta.categories, ask: ask && askText(ask, fmt), last: last && describe(last), adviser: chatting()?.last }); }
+  catch (e) { return claudeFailed(e); }
   if (ask && j.intent !== 'answer') skipped.add(ask.key); // they moved on: ask the next thing, and this one again next time
   try {
     if (j.intent === 'answer' && ask) return answerAsk(ask, j, text);
     if (j.intent === 'correction') return correct(j, text);
     if (j.intent === 'question') return ask_(j, text);
     if (j.intent === 'cash_count') return countCash(j, text);
+    if (j.intent === 'chat') return adviseOn(j.understood || text);
     return addEntry(j, text);
   } catch (e) { showError('حصلت مشكلة', e.message || String(e)); }
+}
+
+function claudeFailed(e) {
+  if (e instanceof Anthropic.AuthenticationError) return showError('مفتاح Claude مش شغال', 'راجعه من الإعدادات');
+  if (e instanceof Anthropic.RateLimitError) return showError('Claude مشغول', 'استنى شوية وجرّب تاني');
+  if (e instanceof Anthropic.APIConnectionError) return showError('مفيش نت', 'Claude محتاج نت يفهم الجملة؛ قولها تاني بعدين');
+  return showError('Claude ماردّش', e.message || String(e));
+}
+
+// The adviser: anything that isn't an Entry or a plain total. It reads a summary of the user's money, built once per
+// conversation; for two minutes after an answer, the next question carries the conversation on. Nothing is saved.
+async function adviseOn(question) {
+  const on = chatting();
+  const money = on ? on.money : moneySummary(book(), new Date(), fmt);
+  let r;
+  try { r = await advise(on ? on.history : [], question, money); }
+  catch (e) { return claudeFailed(e); }
+  chat = { history: r.history, money, last: r.text, until: Date.now() + CHAT_MS };
+  clearTimeout(timers.chat); timers.chat = setTimeout(() => { if (phase === 'idle') paint(); }, CHAT_MS + 50);
+  show({ amt: '', label: '', line: r.text, tone: 'ok', chat: true }, canSpeak ? null : r.text); // spoken aloud below; screen readers would say it twice
+  speakAloud(r.text);
+}
+
+/* ---------- the adviser's voice: the phone's own Arabic voice ---------- */
+const canSpeak = 'speechSynthesis' in window;
+let voiceReady = false;
+function unlockVoice() { // iOS only lets a page speak after it has spoken once from a tap
+  if (!canSpeak || voiceReady) return;
+  try { speechSynthesis.speak(new SpeechSynthesisUtterance('')); voiceReady = true; } catch {}
+}
+function hush() { try { if (canSpeak) speechSynthesis.cancel(); } catch {} }
+function speakAloud(text) {
+  if (!canSpeak) return;
+  try {
+    hush();
+    const u = new SpeechSynthesisUtterance(text.replace(/[«»"]/g, ''));
+    const voices = speechSynthesis.getVoices();
+    const v = voices.find(x => x.lang === 'ar-EG') || voices.find(x => x.lang?.startsWith('ar'));
+    u.lang = v?.lang || 'ar-EG'; if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  } catch {}
 }
 
 function addEntry(j, text) {
@@ -260,10 +304,11 @@ function show(s, spoken) {
   shown = s; phase = 'result'; buzz(s.tone);
   if (spoken) say(spoken);
   clearTimeout(timers.undo); timers.undo = s.undo ? setTimeout(() => { timers.undo = null; paint(); }, SLIP_MS) : null;
+  const stay = s.chat ? Math.min(30_000, 6000 + s.line.length * 70) : SLIP_MS; // long enough to read an answer
   clearTimeout(timers.settle); timers.settle = setTimeout(() => {
     if (phase !== 'result') return;
     shown = null; phase = 'idle'; paint(); setTimeout(() => paintToday(true), 180);
-  }, SLIP_MS);
+  }, stay);
   paint();
 }
 function showError(title, why) { show({ amt: '', label: title, line: why, tone: 'over' }, null); shout(`${title}. ${why}`); }
@@ -289,6 +334,8 @@ function paint() {
     $('amt').innerHTML = shown.amt || '';
     $('s2').textContent = shown.line || '';
     $('slip').toggleAttribute('data-attention', shown.tone !== 'ok');
+    $('slip').toggleAttribute('data-chat', !!shown.chat);
+    $('s1').hidden = !shown.label && !shown.amt;
   }
   on('slip', res);
   $('undo').hidden = !(res && timers.undo && shown.undo);
@@ -297,7 +344,8 @@ function paint() {
   if (phase === 'thinking') orb.setAttribute('aria-disabled', 'true'); else orb.removeAttribute('aria-disabled');
   if (phase === 'idle') {
     const a = currentAsk();
-    $('ask').textContent = note || (!settings.key ? 'اضغط عشان تبدأ' : a ? askText(a, fmt) : speech.supported ? '' : 'اضغط واكتب، أو 🎤 في الكيبورد');
+    $('ask').textContent = note || (!settings.key ? 'اضغط عشان تبدأ' : a ? askText(a, fmt) : chatting() ? 'اسأل تاني تكمّل الكلام'
+      : speech.supported ? '' : 'اضغط واكتب، أو 🎤 في الكيبورد');
     $('ask').toggleAttribute('data-question', !note && !!a);
   }
   paintPending();
@@ -358,6 +406,8 @@ function renderMonth() {
   if (t.amount != null) lines.push(`<p${t.left < 0 ? ' data-attention' : ''}><span>المصروف اليومي</span><b>${t.left < 0 ? `عدّيت ${fmt(-t.left)}` : `فاضل ${fmt(t.left)} من ${fmt(t.pool)}`}</b></p>`);
   const a = answer(book(), { about: 'month', period: 'month' }, now, fmt);
   if (a.egp != null) lines.push(`<p${a.tone !== 'ok' ? ' data-attention' : ''}><span>${esc(a.label)}</span><b>${fmt(Math.abs(a.egp))}</b></p>`);
+  const usd = store.get('claudeCost', {})[monthKey(now)] || 0;
+  if (usd) lines.push(`<p><span>Claude الشهر ده</span><b class="quiet">${usd < 0.01 ? '&lt; $0.01' : `$${usd.toFixed(2)}`}</b></p>`);
   $('msum').innerHTML = lines.join('');
   $('msum').hidden = !lines.length;
 }

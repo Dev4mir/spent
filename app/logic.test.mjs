@@ -1,6 +1,6 @@
 // Run: node app/logic.test.mjs
 import assert from 'node:assert/strict';
-import { monthModel, standing, brief, toEntry, rowToEntry, entryToRow, rowToCategory, categoryToRow, DEFAULT_CATEGORIES, findBankMatch, today, monthRows } from './logic.js';
+import { monthModel, standing, brief, toEntry, rowToEntry, entryToRow, rowToCategory, categoryToRow, DEFAULT_CATEGORIES, findBankMatch, today, monthRows, moneySummary } from './logic.js';
 
 const fmt = n => String(Math.round(n));
 const cats = [
@@ -110,6 +110,20 @@ assert.equal(DEFAULT_CATEGORIES.length, 22);
   assert.deepEqual([rows.at(-1).plan, rows.at(-1).slack], [0, null]);
   const hot = monthRows(monthModel(tl([e('2026-11-15', 'expense', 2900, 'بنزين')]), nov19)).find(r => r.name === 'بنزين');
   assert.deepEqual([hot.slack, hot.attention], [-10, true]); // 2900/19*30 is past 3000
+}
+
+// The adviser's summary: the numbers it needs, this month and last, and recent Entries.
+{
+  const nov19 = new Date(2026, 10, 19);
+  const book = { categories: cats, goal: 10000, entries: [...base, e('2026-11-19', 'expense', 300, 'بنزين'), e('2026-10-12', 'expense', 450, 'مواصلات')] };
+  const text = moneySummary(book, nov19, n => String(Math.round(n)));
+  assert.match(text, /day 19 of 30/);
+  assert.match(text, /Today's number: over today's share by 217; spent today on everyday things: 300; everyday Budgets left this month: 700 of 1000/); // 1000 over 12 days is 83 a day
+  assert.match(text, /income 50000/);
+  assert.match(text, /Last month: income 0, spent 1449/);
+  assert.match(text, /بنزين \| متغير \| 1000 \| - \| 300 \| 999 \|/);
+  assert.match(text, /مواصلات \| متغير \| 0 \| - \| 0 \| 450 \|/); // spent last month only: still listed
+  assert.match(text, /2026-11-19 \| expense \| 300 \| بنزين/);
 }
 
 console.log('logic: all checks passed');

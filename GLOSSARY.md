@@ -100,6 +100,10 @@ _Avoid_: Allowance, safe to spend, daily budget, balance
 The list behind a swipe up: one row per Category with a Budget, a Set-aside or spending this month, each with its bar and a tick where even spending would be today; Variable Categories say how many days ahead or behind they are.
 _Avoid_: Dashboard, report, summary
 
+**Adviser**:
+Claude answering anything that isn't an Entry, a Correction or a plain Question: advice about the user's money, why or compare questions, and how to use the app. It reads a summary of this month and last, answers in a few spoken sentences, and saves nothing. A new question within two minutes continues the same conversation.
+_Avoid_: Assistant, chatbot, agent, coach
+
 **Check-in**:
 The evening notification: what was spent today, whether the month is on track, and a reminder about Cash spent but not yet logged.
 _Avoid_: Daily report, digest, reminder

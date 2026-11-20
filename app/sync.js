@@ -8,7 +8,7 @@
 //
 // One sync = read the Sheet, reconcile (below), push the plan. Every step is idempotent: a push lost half-way is
 // planned again from the next read, so nothing is written twice.
-import { findVoiceMatch, matchInto } from './logic.js?v=6';
+import { findVoiceMatch, matchInto } from './logic.js?v=7';
 
 const strip = ({ row, status, ...e }) => e;
 

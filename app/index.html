@@ -84,6 +84,8 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .amt small { font-size: .4em; color: var(--dim); margin-inline-start: .25em; letter-spacing: 0; }
 .s2 { font-size: 15px; color: var(--dim); max-width: 32ch; text-wrap: balance; }
 .slip[data-attention] .s2 { color: var(--accent); }
+.slip[data-chat] .s2 { font-size: 19px; line-height: 1.65; color: var(--ink); max-width: 30ch; } /* the adviser's answer */
+.msum b.quiet { color: var(--dim); font-weight: 400; }
 .undo { min-height: 44px; padding-inline: 12px; font-size: 14px; color: var(--dim); }
 
 .ask { min-height: 24px; text-align: center; font-size: 15px; color: var(--dim); text-wrap: balance; transition: opacity .2s; }
@@ -190,7 +192,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
       <div class="said fade" id="said"><p><span id="fin"></span><span class="vol" id="vol"></span></p><div class="wait" aria-hidden="true"></div></div>
       <form class="typed fade" id="typedForm"><input id="typed" autocomplete="off" enterkeyhint="send" lang="ar" dir="rtl" placeholder="اكتب أو اضغط 🎤 في الكيبورد" aria-label="الصرفة"></form>
       <div class="slip fade" id="slip">
-        <p class="s1"><span class="cat" id="cat"></span><bdi class="amt" id="amt"></bdi></p>
+        <p class="s1" id="s1"><span class="cat" id="cat"></span><bdi class="amt" id="amt"></bdi></p>
         <p class="s2" id="s2"></p>
         <button class="undo" id="undo" type="button">تراجع</button>
       </div>
@@ -255,6 +257,6 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   <div class="row"><button class="btn" id="save" type="button">تمام</button></div>
 </dialog>
 
-<script type="module" src="app.js?v=6"></script>
+<script type="module" src="app.js?v=7"></script>
 </body>
 </html>
